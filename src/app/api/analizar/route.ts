@@ -109,18 +109,28 @@ Si un campo no tiene información disponible en los documentos, dejá el valor c
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    max_tokens: 8192,
+    system: 'Sos un analista de licitaciones. Respondé EXCLUSIVAMENTE con un objeto JSON válido, sin markdown, sin explicaciones ni texto antes o después.',
     messages: [{ role: 'user', content: prompt }],
   })
 
   const respuesta = message.content[0].type === 'text' ? message.content[0].text : ''
+  // Extraemos el objeto JSON entre la primera "{" y la última "}", descartando
+  // cualquier texto o markdown que el modelo haya añadido alrededor.
+  const ini = respuesta.indexOf('{')
+  const fin = respuesta.lastIndexOf('}')
+  const jsonStr = ini !== -1 && fin !== -1 ? respuesta.slice(ini, fin + 1) : respuesta
 
   let resultado
   try {
-    const limpio = respuesta.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    resultado = JSON.parse(limpio)
+    resultado = JSON.parse(jsonStr)
   } catch {
-    return NextResponse.json({ error: 'Error parseando respuesta de IA' }, { status: 500 })
+    console.error('No se pudo parsear la respuesta de IA. stop_reason:', message.stop_reason, '| respuesta:', respuesta.slice(0, 500))
+    return NextResponse.json({
+      error: message.stop_reason === 'max_tokens'
+        ? 'El análisis fue demasiado largo y se cortó. Probá con menos documentos o instrucciones más acotadas.'
+        : 'Error parseando respuesta de IA',
+    }, { status: 500 })
   }
 
   if (advertencias.length > 0) {
