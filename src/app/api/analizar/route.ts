@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { anthropic } from '@/lib/anthropic'
+import pdfParse from 'pdf-parse'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -34,8 +35,6 @@ export async function POST(req: NextRequest) {
     if (doc.tipo === 'pdf') {
       try {
         const buffer = Buffer.from(await fileData.arrayBuffer())
-        const pdfParseMod = await import('pdf-parse')
-        const pdfParse = (pdfParseMod as any).default ?? pdfParseMod
         const parsed = await pdfParse(buffer)
         const texto = parsed.text?.trim() ?? ''
         if (!texto) {
