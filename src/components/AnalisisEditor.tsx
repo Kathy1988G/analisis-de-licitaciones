@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Sparkles, Save, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Sparkles, Save, Plus, Trash2, ChevronDown, ChevronUp, Loader2, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Analisis, Documento } from '@/types'
 
@@ -38,11 +38,23 @@ export default function AnalisisEditor({ licitacionId, documentos, analisis, onA
   const [instrucciones, setInstrucciones] = useState('')
   const [mostrarInstrucciones, setMostrarInstrucciones] = useState(false)
   const [analizando, setAnalizando] = useState(false)
+  const [progreso, setProgreso] = useState(0)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
   const [advertencias, setAdvertencias] = useState<string[]>([])
   const [nuevoNombre, setNuevoNombre] = useState('')
   const supabase = createClient()
+  const progresoTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function detenerProgreso() {
+    if (progresoTimer.current) {
+      clearInterval(progresoTimer.current)
+      progresoTimer.current = null
+    }
+  }
+
+  // Limpia el intervalo si el componente se desmonta mientras analiza.
+  useEffect(() => detenerProgreso, [])
 
   async function analizarConIA() {
     if (documentos.length === 0) {
@@ -52,6 +64,18 @@ export default function AnalisisEditor({ licitacionId, documentos, analisis, onA
     setAnalizando(true)
     setError('')
     setAdvertencias([])
+
+    // Progreso simulado: el servidor no emite avances, así que avanzamos hacia
+    // ~92% (rápido al inicio, lento al final) y saltamos a 100% al terminar.
+    setProgreso(6)
+    detenerProgreso()
+    progresoTimer.current = setInterval(() => {
+      setProgreso(p => {
+        if (p >= 92) return p
+        const inc = p < 40 ? 3.5 : p < 70 ? 1.6 : 0.6
+        return Math.min(92, p + inc)
+      })
+    }, 350)
 
     try {
       const res = await fetch('/api/analizar', {
@@ -81,10 +105,17 @@ export default function AnalisisEditor({ licitacionId, documentos, analisis, onA
       })
       if (data.campos_adicionales) setCamposExtra(data.campos_adicionales)
       if (data._advertencias?.length) setAdvertencias(data._advertencias)
+
+      // Completar la barra y mostrar el 100% un instante antes de ocultarla.
+      detenerProgreso()
+      setProgreso(100)
+      await new Promise(r => setTimeout(r, 700))
     } catch (e: any) {
+      detenerProgreso()
       setError(e?.message ?? 'Error al analizar los documentos.')
     } finally {
       setAnalizando(false)
+      setProgreso(0)
     }
   }
 
@@ -171,9 +202,9 @@ export default function AnalisisEditor({ licitacionId, documentos, analisis, onA
         <button
           onClick={analizarConIA}
           disabled={analizando || documentos.length === 0}
-          className="flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 transition-all shadow-sm"
         >
-          <Sparkles size={15} />
+          {analizando ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
           {analizando ? 'Analizando...' : analisis ? 'Re-analizar con IA' : 'Analizar con IA'}
         </button>
         <button
@@ -198,8 +229,34 @@ export default function AnalisisEditor({ licitacionId, documentos, analisis, onA
       )}
 
       {analizando && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-600">
-          Claude está leyendo los documentos... Esto puede tardar unos segundos.
+        <div className="bg-white border border-blue-100 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            {progreso >= 100
+              ? <CheckCircle2 size={16} className="text-green-500" />
+              : <Loader2 size={16} className="text-blue-600 animate-spin" />}
+            <span className="text-sm font-medium text-gray-700">
+              {progreso >= 100
+                ? '¡Análisis completo!'
+                : progreso < 35
+                ? 'Leyendo los documentos...'
+                : progreso < 75
+                ? 'Claude está analizando el contenido...'
+                : 'Extrayendo la información clave...'}
+            </span>
+            <span className="ml-auto text-sm font-semibold text-blue-600 tabular-nums">
+              {Math.round(progreso)}%
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-blue-50 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ease-out ${
+                progreso >= 100
+                  ? 'bg-gradient-to-r from-green-500 to-emerald-500'
+                  : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+              }`}
+              style={{ width: `${progreso}%` }}
+            />
+          </div>
         </div>
       )}
 

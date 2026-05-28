@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { anthropic } from '@/lib/anthropic'
+import { DOMMatrix } from '@napi-rs/canvas/geometry.js'
+
+// pdf-parse usa pdfjs-dist, que referencia DOMMatrix/ImageData/Path2D al cargar.
+// En el runtime serverless de Vercel esas APIs de navegador no existen y el
+// módulo falla con "DOMMatrix is not defined". Definimos los globals aquí (con
+// el DOMMatrix puro-JS de @napi-rs/canvas, sin binario nativo); como solo
+// extraemos texto y no renderizamos, basta con stubs para ImageData/Path2D.
+const g = globalThis as unknown as Record<string, unknown>
+g.DOMMatrix ??= DOMMatrix
+g.ImageData ??= class ImageData {}
+g.Path2D ??= class Path2D {}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
