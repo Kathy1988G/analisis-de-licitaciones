@@ -13,7 +13,27 @@ g.DOMMatrix ??= DOMMatrix
 g.ImageData ??= class ImageData {}
 g.Path2D ??= class Path2D {}
 
+// El análisis llama a Claude con pliegos largos: necesita más que el timeout
+// por defecto. Forzamos runtime Node (pdf-parse/xlsx no corren en edge).
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 export async function POST(req: NextRequest) {
+  try {
+    return await analizar(req)
+  } catch (e: any) {
+    // Cualquier excepción no controlada (p. ej. fallo de la llamada a Claude)
+    // se devuelve como JSON para que el cliente muestre el motivo real en vez
+    // de un 500 con HTML opaco ("Error en el análisis").
+    console.error('Error no controlado en /api/analizar:', e)
+    return NextResponse.json(
+      { error: `Error en el análisis: ${e?.message ?? 'desconocido'}` },
+      { status: 500 },
+    )
+  }
+}
+
+async function analizar(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
@@ -107,14 +127,24 @@ Si un campo no tiene información disponible en los documentos, dejá el valor c
       : ''
   }`
 
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
-    system: 'Sos un analista de licitaciones. Respondé EXCLUSIVAMENTE con un objeto JSON válido, sin markdown, sin explicaciones ni texto antes o después.',
-    messages: [{ role: 'user', content: prompt }],
-  })
+  let message
+  try {
+    message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      system: 'Sos un analista de licitaciones. Respondé EXCLUSIVAMENTE con un objeto JSON válido, sin markdown, sin explicaciones ni texto antes o después.',
+      messages: [{ role: 'user', content: prompt }],
+    })
+  } catch (e: any) {
+    console.error('Fallo la llamada a Claude:', e?.status, e?.message)
+    return NextResponse.json(
+      { error: `La IA no pudo procesar el análisis: ${e?.message ?? 'error de conexión'}` },
+      { status: 502 },
+    )
+  }
 
-  const respuesta = message.content[0].type === 'text' ? message.content[0].text : ''
+  const primerBloque = message.content[0]
+  const respuesta = primerBloque?.type === 'text' ? primerBloque.text : ''
   // Extraemos el objeto JSON entre la primera "{" y la última "}", descartando
   // cualquier texto o markdown que el modelo haya añadido alrededor.
   const ini = respuesta.indexOf('{')
